@@ -1,86 +1,121 @@
-import { describe, it, expect, beforeEach } from "vitest";
 import {
   createSecretStore,
   setSecret,
   getSecret,
-  updateSecret,
   deleteSecret,
   listSecrets,
-} from "./secrets";
-import { SecretStore } from "./secrets.types";
+  secretExists,
+  bulkSetSecrets,
+  makeStoreKey,
+} from './secrets';
 
-const MASTER_PASSWORD = "test-master-password";
-const VAULT_ID = "vault-1";
-const ACTOR = "user-1";
+const VAULT_ID = 'vault-abc';
+const ACTOR = 'user-1';
 
-describe("secrets", () => {
-  let store: SecretStore;
+describe('createSecretStore', () => {
+  it('creates an empty store', () => {
+    const store = createSecretStore();
+    expect(store.secrets.size).toBe(0);
+  });
+});
 
-  beforeEach(() => {
-    store = createSecretStore();
+describe('makeStoreKey', () => {
+  it('combines vaultId and name', () => {
+    expect(makeStoreKey('v1', 'DB_URL')).toBe('v1:DB_URL');
+  });
+});
+
+describe('setSecret', () => {
+  it('stores a new secret with version 1', () => {
+    const store = createSecretStore();
+    const secret = setSecret(store, VAULT_ID, 'API_KEY', 'secret123', ACTOR);
+    expect(secret.name).toBe('API_KEY');
+    expect(secret.value).toBe('secret123');
+    expect(secret.version).toBe(1);
+    expect(secret.createdBy).toBe(ACTOR);
   });
 
-  it("should set and retrieve a secret", async () => {
-    await setSecret(
-      store,
-      { vaultId: VAULT_ID, key: "DB_URL", value: "postgres://localhost", createdBy: ACTOR },
-      MASTER_PASSWORD
-    );
-
-    const result = await getSecret(store, VAULT_ID, "DB_URL", MASTER_PASSWORD);
-    expect(result.found).toBe(true);
-    if (result.found) {
-      expect(result.secret.encryptedValue).toBe("postgres://localhost");
-      expect(result.secret.metadata.version).toBe(1);
-      expect(result.secret.metadata.createdBy).toBe(ACTOR);
-    }
+  it('increments version on update', () => {
+    const store = createSecretStore();
+    setSecret(store, VAULT_ID, 'API_KEY', 'v1', ACTOR);
+    const updated = setSecret(store, VAULT_ID, 'API_KEY', 'v2', 'user-2');
+    expect(updated.version).toBe(2);
+    expect(updated.updatedBy).toBe('user-2');
+    expect(updated.createdBy).toBe(ACTOR);
   });
 
-  it("should return not found for missing secret", async () => {
-    const result = await getSecret(store, VAULT_ID, "MISSING", MASTER_PASSWORD);
-    expect(result.found).toBe(false);
+  it('stores metadata tags and description', () => {
+    const store = createSecretStore();
+    const secret = setSecret(store, VAULT_ID, 'DB_PASS', 'pass', ACTOR, {
+      tags: ['db', 'prod'],
+      description: 'Database password',
+    });
+    expect(secret.tags).toEqual(['db', 'prod']);
+    expect(secret.description).toBe('Database password');
+  });
+});
+
+describe('getSecret', () => {
+  it('retrieves an existing secret', () => {
+    const store = createSecretStore();
+    setSecret(store, VAULT_ID, 'TOKEN', 'tok', ACTOR);
+    const s = getSecret(store, VAULT_ID, 'TOKEN');
+    expect(s?.value).toBe('tok');
   });
 
-  it("should increment version on overwrite via setSecret", async () => {
-    await setSecret(store, { vaultId: VAULT_ID, key: "API_KEY", value: "v1", createdBy: ACTOR }, MASTER_PASSWORD);
-    await setSecret(store, { vaultId: VAULT_ID, key: "API_KEY", value: "v2", createdBy: ACTOR }, MASTER_PASSWORD);
+  it('returns undefined for missing secret', () => {
+    const store = createSecretStore();
+    expect(getSecret(store, VAULT_ID, 'MISSING')).toBeUndefined();
+  });
+});
 
-    const result = await getSecret(store, VAULT_ID, "API_KEY", MASTER_PASSWORD);
-    expect(result.found).toBe(true);
-    if (result.found) {
-      expect(result.secret.metadata.version).toBe(2);
-      expect(result.secret.encryptedValue).toBe("v2");
-    }
+describe('deleteSecret', () => {
+  it('removes a secret and returns true', () => {
+    const store = createSecretStore();
+    setSecret(store, VAULT_ID, 'X', 'val', ACTOR);
+    expect(deleteSecret(store, VAULT_ID, 'X')).toBe(true);
+    expect(getSecret(store, VAULT_ID, 'X')).toBeUndefined();
   });
 
-  it("should update a secret", async () => {
-    await setSecret(store, { vaultId: VAULT_ID, key: "TOKEN", value: "old", createdBy: ACTOR }, MASTER_PASSWORD);
-    await updateSecret(store, VAULT_ID, "TOKEN", { value: "new", updatedBy: ACTOR }, MASTER_PASSWORD);
+  it('returns false when secret does not exist', () => {
+    const store = createSecretStore();
+    expect(deleteSecret(store, VAULT_ID, 'NOPE')).toBe(false);
+  });
+});
 
-    const result = await getSecret(store, VAULT_ID, "TOKEN", MASTER_PASSWORD);
-    expect(result.found).toBe(true);
-    if (result.found) {
-      expect(result.secret.encryptedValue).toBe("new");
-      expect(result.secret.metadata.version).toBe(2);
-    }
+describe('listSecrets', () => {
+  it('lists only secrets for the given vault', () => {
+    const store = createSecretStore();
+    setSecret(store, VAULT_ID, 'A', '1', ACTOR);
+    setSecret(store, VAULT_ID, 'B', '2', ACTOR);
+    setSecret(store, 'other-vault', 'C', '3', ACTOR);
+    const list = listSecrets(store, VAULT_ID);
+    expect(list).toHaveLength(2);
+    expect(list.map((s) => s.name).sort()).toEqual(['A', 'B']);
+  });
+});
+
+describe('secretExists', () => {
+  it('returns true when secret exists', () => {
+    const store = createSecretStore();
+    setSecret(store, VAULT_ID, 'KEY', 'val', ACTOR);
+    expect(secretExists(store, VAULT_ID, 'KEY')).toBe(true);
   });
 
-  it("should delete a secret", async () => {
-    await setSecret(store, { vaultId: VAULT_ID, key: "DEL_KEY", value: "val", createdBy: ACTOR }, MASTER_PASSWORD);
-    const deleted = deleteSecret(store, VAULT_ID, "DEL_KEY");
-    expect(deleted).toBe(true);
-
-    const result = await getSecret(store, VAULT_ID, "DEL_KEY", MASTER_PASSWORD);
-    expect(result.found).toBe(false);
+  it('returns false when secret does not exist', () => {
+    const store = createSecretStore();
+    expect(secretExists(store, VAULT_ID, 'KEY')).toBe(false);
   });
+});
 
-  it("should list secrets for a vault", async () => {
-    await setSecret(store, { vaultId: VAULT_ID, key: "A", value: "1", createdBy: ACTOR }, MASTER_PASSWORD);
-    await setSecret(store, { vaultId: VAULT_ID, key: "B", value: "2", createdBy: ACTOR }, MASTER_PASSWORD);
-    await setSecret(store, { vaultId: "other-vault", key: "C", value: "3", createdBy: ACTOR }, MASTER_PASSWORD);
-
-    const secrets = listSecrets(store, VAULT_ID);
-    expect(secrets).toHaveLength(2);
-    expect(secrets.map((s) => s.key).sort()).toEqual(["A", "B"]);
+describe('bulkSetSecrets', () => {
+  it('sets multiple secrets at once', () => {
+    const store = createSecretStore();
+    const results = bulkSetSecrets(store, VAULT_ID, [
+      { name: 'A', value: '1' },
+      { name: 'B', value: '2' },
+    ], ACTOR);
+    expect(results).toHaveLength(2);
+    expect(listSecrets(store, VAULT_ID)).toHaveLength(2);
   });
 });

@@ -1,104 +1,89 @@
-import { randomUUID } from "crypto";
-import { encrypt, decrypt } from "../crypto/encryption";
-import {
-  Secret,
-  SecretStore,
-  CreateSecretInput,
-  UpdateSecretInput,
-  GetSecretResult,
-} from "./secrets.types";
+import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'crypto';
+import { Secret, SecretStore, SecretMetadata } from './secrets.types';
 
 export function createSecretStore(): SecretStore {
-  return { secrets: new Map() };
+  const secrets = new Map<string, Secret>();
+  return { secrets };
 }
 
-export function makeStoreKey(vaultId: string, key: string): string {
-  return `${vaultId}::${key}`;
+export function makeStoreKey(vaultId: string, name: string): string {
+  return `${vaultId}:${name}`;
 }
 
-export async function setSecret(
+export function setSecret(
   store: SecretStore,
-  input: CreateSecretInput,
-  masterPassword: string
-): Promise<Secret> {
-  const storeKey = makeStoreKey(input.vaultId, input.key);
-  const existing = store.secrets.get(storeKey);
-  const encryptedValue = await encrypt(input.value, masterPassword);
-  const now = new Date();
+  vaultId: string,
+  name: string,
+  value: string,
+  actor: string,
+  metadata?: Partial<SecretMetadata>
+): Secret {
+  const key = makeStoreKey(vaultId, name);
+  const now = new Date().toISOString();
+  const existing = store.secrets.get(key);
 
   const secret: Secret = {
-    id: existing?.id ?? randomUUID(),
-    vaultId: input.vaultId,
-    key: input.key,
-    encryptedValue,
-    metadata: {
-      createdAt: existing?.metadata.createdAt ?? now,
-      updatedAt: now,
-      createdBy: existing?.metadata.createdBy ?? input.createdBy,
-      version: (existing?.metadata.version ?? 0) + 1,
-      tags: input.tags ?? existing?.metadata.tags,
-    },
+    id: existing?.id ?? crypto.randomUUID(),
+    vaultId,
+    name,
+    value,
+    version: (existing?.version ?? 0) + 1,
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: now,
+    createdBy: existing?.createdBy ?? actor,
+    updatedBy: actor,
+    tags: metadata?.tags ?? existing?.tags ?? [],
+    description: metadata?.description ?? existing?.description,
   };
 
-  store.secrets.set(storeKey, secret);
+  store.secrets.set(key, secret);
   return secret;
 }
 
-export async function getSecret(
+export function getSecret(
   store: SecretStore,
   vaultId: string,
-  key: string,
-  masterPassword: string
-): Promise<GetSecretResult> {
-  const storeKey = makeStoreKey(vaultId, key);
-  const secret = store.secrets.get(storeKey);
-  if (!secret) return { found: false };
-
-  const decryptedValue = await decrypt(secret.encryptedValue, masterPassword);
-  return {
-    found: true,
-    secret: { ...secret, encryptedValue: decryptedValue },
-  };
-}
-
-export async function updateSecret(
-  store: SecretStore,
-  vaultId: string,
-  key: string,
-  input: UpdateSecretInput,
-  masterPassword: string
-): Promise<Secret | null> {
-  const storeKey = makeStoreKey(vaultId, key);
-  const existing = store.secrets.get(storeKey);
-  if (!existing) return null;
-
-  const encryptedValue = await encrypt(input.value, masterPassword);
-  const updated: Secret = {
-    ...existing,
-    encryptedValue,
-    metadata: {
-      ...existing.metadata,
-      updatedAt: new Date(),
-      version: existing.metadata.version + 1,
-      tags: input.tags ?? existing.metadata.tags,
-    },
-  };
-
-  store.secrets.set(storeKey, updated);
-  return updated;
+  name: string
+): Secret | undefined {
+  return store.secrets.get(makeStoreKey(vaultId, name));
 }
 
 export function deleteSecret(
   store: SecretStore,
   vaultId: string,
-  key: string
+  name: string
 ): boolean {
-  const storeKey = makeStoreKey(vaultId, key);
-  return store.secrets.delete(storeKey);
+  return store.secrets.delete(makeStoreKey(vaultId, name));
 }
 
-export function listSecrets(store: SecretStore, vaultId: string): Secret[] {
-  return Array.from(store.secrets.values()).filter(
-    (s) => s.vaultId === vaultId
+export function listSecrets(
+  store: SecretStore,
+  vaultId: string
+): Secret[] {
+  const results: Secret[] = [];
+  for (const [key, secret] of store.secrets.entries()) {
+    if (key.startsWith(`${vaultId}:`)) {
+      results.push(secret);
+    }
+  }
+  return results;
+}
+
+export function secretExists(
+  store: SecretStore,
+  vaultId: string,
+  name: string
+): boolean {
+  return store.secrets.has(makeStoreKey(vaultId, name));
+}
+
+export function bulkSetSecrets(
+  store: SecretStore,
+  vaultId: string,
+  entries: Array<{ name: string; value: string }>,
+  actor: string
+): Secret[] {
+  return entries.map(({ name, value }) =>
+    setSecret(store, vaultId, name, value, actor)
   );
 }
