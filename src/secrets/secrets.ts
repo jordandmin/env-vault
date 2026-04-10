@@ -1,19 +1,19 @@
-import { randomUUID } from 'crypto';
-import { encrypt, decrypt } from '../crypto/encryption';
+import { randomUUID } from "crypto";
+import { encrypt, decrypt } from "../crypto/encryption";
 import {
   Secret,
   SecretStore,
   CreateSecretInput,
   UpdateSecretInput,
-  SecretResult,
-} from './secrets.types';
+  GetSecretResult,
+} from "./secrets.types";
 
 export function createSecretStore(): SecretStore {
   return { secrets: new Map() };
 }
 
-function makeStoreKey(vaultId: string, key: string): string {
-  return `${vaultId}:${key}`;
+export function makeStoreKey(vaultId: string, key: string): string {
+  return `${vaultId}::${key}`;
 }
 
 export async function setSecret(
@@ -31,10 +31,13 @@ export async function setSecret(
     vaultId: input.vaultId,
     key: input.key,
     encryptedValue,
-    createdAt: existing?.createdAt ?? now,
-    updatedAt: now,
-    createdBy: existing?.createdBy ?? input.actorId,
-    version: (existing?.version ?? 0) + 1,
+    metadata: {
+      createdAt: existing?.metadata.createdAt ?? now,
+      updatedAt: now,
+      createdBy: existing?.metadata.createdBy ?? input.createdBy,
+      version: (existing?.metadata.version ?? 0) + 1,
+      tags: input.tags ?? existing?.metadata.tags,
+    },
   };
 
   store.secrets.set(storeKey, secret);
@@ -46,21 +49,43 @@ export async function getSecret(
   vaultId: string,
   key: string,
   masterPassword: string
-): Promise<SecretResult | null> {
+): Promise<GetSecretResult> {
   const storeKey = makeStoreKey(vaultId, key);
   const secret = store.secrets.get(storeKey);
-  if (!secret) return null;
+  if (!secret) return { found: false };
 
-  const value = await decrypt(secret.encryptedValue, masterPassword);
+  const decryptedValue = await decrypt(secret.encryptedValue, masterPassword);
   return {
-    id: secret.id,
-    vaultId: secret.vaultId,
-    key: secret.key,
-    value,
-    version: secret.version,
-    createdAt: secret.createdAt,
-    updatedAt: secret.updatedAt,
+    found: true,
+    secret: { ...secret, encryptedValue: decryptedValue },
   };
+}
+
+export async function updateSecret(
+  store: SecretStore,
+  vaultId: string,
+  key: string,
+  input: UpdateSecretInput,
+  masterPassword: string
+): Promise<Secret | null> {
+  const storeKey = makeStoreKey(vaultId, key);
+  const existing = store.secrets.get(storeKey);
+  if (!existing) return null;
+
+  const encryptedValue = await encrypt(input.value, masterPassword);
+  const updated: Secret = {
+    ...existing,
+    encryptedValue,
+    metadata: {
+      ...existing.metadata,
+      updatedAt: new Date(),
+      version: existing.metadata.version + 1,
+      tags: input.tags ?? existing.metadata.tags,
+    },
+  };
+
+  store.secrets.set(storeKey, updated);
+  return updated;
 }
 
 export function deleteSecret(
@@ -72,21 +97,8 @@ export function deleteSecret(
   return store.secrets.delete(storeKey);
 }
 
-export function listSecrets(
-  store: SecretStore,
-  vaultId: string
-): Pick<Secret, 'id' | 'key' | 'version' | 'updatedAt' | 'createdBy'>[] {
-  const results: Pick<Secret, 'id' | 'key' | 'version' | 'updatedAt' | 'createdBy'>[] = [];
-  for (const secret of store.secrets.values()) {
-    if (secret.vaultId === vaultId) {
-      results.push({
-        id: secret.id,
-        key: secret.key,
-        version: secret.version,
-        updatedAt: secret.updatedAt,
-        createdBy: secret.createdBy,
-      });
-    }
-  }
-  return results;
+export function listSecrets(store: SecretStore, vaultId: string): Secret[] {
+  return Array.from(store.secrets.values()).filter(
+    (s) => s.vaultId === vaultId
+  );
 }

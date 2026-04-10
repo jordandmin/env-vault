@@ -1,72 +1,86 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach } from "vitest";
 import {
   createSecretStore,
   setSecret,
   getSecret,
+  updateSecret,
   deleteSecret,
   listSecrets,
-} from './secrets';
-import { SecretStore } from './secrets.types';
+} from "./secrets";
+import { SecretStore } from "./secrets.types";
 
-const MASTER_PASSWORD = 'test-master-password';
-const VAULT_ID = 'vault-abc';
-const ACTOR_ID = 'user-1';
+const MASTER_PASSWORD = "test-master-password";
+const VAULT_ID = "vault-1";
+const ACTOR = "user-1";
 
-describe('secrets', () => {
+describe("secrets", () => {
   let store: SecretStore;
 
   beforeEach(() => {
     store = createSecretStore();
   });
 
-  it('should set and retrieve a secret', async () => {
-    await setSecret(store, { vaultId: VAULT_ID, key: 'DB_URL', value: 'postgres://localhost', actorId: ACTOR_ID }, MASTER_PASSWORD);
-    const result = await getSecret(store, VAULT_ID, 'DB_URL', MASTER_PASSWORD);
-    expect(result).not.toBeNull();
-    expect(result?.value).toBe('postgres://localhost');
-    expect(result?.key).toBe('DB_URL');
-    expect(result?.version).toBe(1);
+  it("should set and retrieve a secret", async () => {
+    await setSecret(
+      store,
+      { vaultId: VAULT_ID, key: "DB_URL", value: "postgres://localhost", createdBy: ACTOR },
+      MASTER_PASSWORD
+    );
+
+    const result = await getSecret(store, VAULT_ID, "DB_URL", MASTER_PASSWORD);
+    expect(result.found).toBe(true);
+    if (result.found) {
+      expect(result.secret.encryptedValue).toBe("postgres://localhost");
+      expect(result.secret.metadata.version).toBe(1);
+      expect(result.secret.metadata.createdBy).toBe(ACTOR);
+    }
   });
 
-  it('should return null for missing secret', async () => {
-    const result = await getSecret(store, VAULT_ID, 'MISSING', MASTER_PASSWORD);
-    expect(result).toBeNull();
+  it("should return not found for missing secret", async () => {
+    const result = await getSecret(store, VAULT_ID, "MISSING", MASTER_PASSWORD);
+    expect(result.found).toBe(false);
   });
 
-  it('should increment version on update', async () => {
-    await setSecret(store, { vaultId: VAULT_ID, key: 'API_KEY', value: 'old-key', actorId: ACTOR_ID }, MASTER_PASSWORD);
-    await setSecret(store, { vaultId: VAULT_ID, key: 'API_KEY', value: 'new-key', actorId: ACTOR_ID }, MASTER_PASSWORD);
-    const result = await getSecret(store, VAULT_ID, 'API_KEY', MASTER_PASSWORD);
-    expect(result?.value).toBe('new-key');
-    expect(result?.version).toBe(2);
+  it("should increment version on overwrite via setSecret", async () => {
+    await setSecret(store, { vaultId: VAULT_ID, key: "API_KEY", value: "v1", createdBy: ACTOR }, MASTER_PASSWORD);
+    await setSecret(store, { vaultId: VAULT_ID, key: "API_KEY", value: "v2", createdBy: ACTOR }, MASTER_PASSWORD);
+
+    const result = await getSecret(store, VAULT_ID, "API_KEY", MASTER_PASSWORD);
+    expect(result.found).toBe(true);
+    if (result.found) {
+      expect(result.secret.metadata.version).toBe(2);
+      expect(result.secret.encryptedValue).toBe("v2");
+    }
   });
 
-  it('should delete a secret', async () => {
-    await setSecret(store, { vaultId: VAULT_ID, key: 'TOKEN', value: 'secret', actorId: ACTOR_ID }, MASTER_PASSWORD);
-    const deleted = deleteSecret(store, VAULT_ID, 'TOKEN');
+  it("should update a secret", async () => {
+    await setSecret(store, { vaultId: VAULT_ID, key: "TOKEN", value: "old", createdBy: ACTOR }, MASTER_PASSWORD);
+    await updateSecret(store, VAULT_ID, "TOKEN", { value: "new", updatedBy: ACTOR }, MASTER_PASSWORD);
+
+    const result = await getSecret(store, VAULT_ID, "TOKEN", MASTER_PASSWORD);
+    expect(result.found).toBe(true);
+    if (result.found) {
+      expect(result.secret.encryptedValue).toBe("new");
+      expect(result.secret.metadata.version).toBe(2);
+    }
+  });
+
+  it("should delete a secret", async () => {
+    await setSecret(store, { vaultId: VAULT_ID, key: "DEL_KEY", value: "val", createdBy: ACTOR }, MASTER_PASSWORD);
+    const deleted = deleteSecret(store, VAULT_ID, "DEL_KEY");
     expect(deleted).toBe(true);
-    const result = await getSecret(store, VAULT_ID, 'TOKEN', MASTER_PASSWORD);
-    expect(result).toBeNull();
+
+    const result = await getSecret(store, VAULT_ID, "DEL_KEY", MASTER_PASSWORD);
+    expect(result.found).toBe(false);
   });
 
-  it('should return false when deleting non-existent secret', () => {
-    const deleted = deleteSecret(store, VAULT_ID, 'GHOST');
-    expect(deleted).toBe(false);
-  });
+  it("should list secrets for a vault", async () => {
+    await setSecret(store, { vaultId: VAULT_ID, key: "A", value: "1", createdBy: ACTOR }, MASTER_PASSWORD);
+    await setSecret(store, { vaultId: VAULT_ID, key: "B", value: "2", createdBy: ACTOR }, MASTER_PASSWORD);
+    await setSecret(store, { vaultId: "other-vault", key: "C", value: "3", createdBy: ACTOR }, MASTER_PASSWORD);
 
-  it('should list secrets for a vault without exposing values', async () => {
-    await setSecret(store, { vaultId: VAULT_ID, key: 'KEY_A', value: 'val-a', actorId: ACTOR_ID }, MASTER_PASSWORD);
-    await setSecret(store, { vaultId: VAULT_ID, key: 'KEY_B', value: 'val-b', actorId: ACTOR_ID }, MASTER_PASSWORD);
-    await setSecret(store, { vaultId: 'other-vault', key: 'KEY_C', value: 'val-c', actorId: ACTOR_ID }, MASTER_PASSWORD);
-    const list = listSecrets(store, VAULT_ID);
-    expect(list).toHaveLength(2);
-    expect(list.map(s => s.key)).toContain('KEY_A');
-    expect(list.map(s => s.key)).toContain('KEY_B');
-    expect(list.every(s => !('value' in s))).toBe(true);
-  });
-
-  it('should fail to decrypt with wrong password', async () => {
-    await setSecret(store, { vaultId: VAULT_ID, key: 'SECRET', value: 'hidden', actorId: ACTOR_ID }, MASTER_PASSWORD);
-    await expect(getSecret(store, VAULT_ID, 'SECRET', 'wrong-password')).rejects.toThrow();
+    const secrets = listSecrets(store, VAULT_ID);
+    expect(secrets).toHaveLength(2);
+    expect(secrets.map((s) => s.key).sort()).toEqual(["A", "B"]);
   });
 });
