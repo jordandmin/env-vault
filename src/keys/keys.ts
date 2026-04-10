@@ -74,3 +74,12 @@ export function getActiveKeyForVault(
 export function getKeysForVault(store: KeyStore, vaultId: string): VaultKey[] {
   return Array.from(store.keys.values()).filter((k) => k.vaultId === vaultId);
 }
+
+/**
+ * Returns the key with the given id, or throws if it does not exist.
+ */
+export function getKeyById(store: KeyStore, keyId: string): VaultKey {
+  const key = store.keys.get(keyId);
+  if (!key) throw new Error(`Key not found: ${keyId}`);
+  return key;
+}
