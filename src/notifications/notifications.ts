@@ -50,6 +50,16 @@ export function getSubscriptionsForActor(
   return Array.from(store.subscriptions.values()).filter((s) => s.actorId === actorId);
 }
 
+/**
+ * Returns the subscription with the given ID, or undefined if not found.
+ */
+export function getSubscriptionById(
+  store: NotificationStore,
+  subscriptionId: string
+): NotificationSubscription | undefined {
+  return store.subscriptions.get(subscriptionId);
+}
+
 export async function dispatch(
   store: NotificationStore,
   payload: NotificationPayload,
