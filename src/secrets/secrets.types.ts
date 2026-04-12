@@ -4,6 +4,7 @@ export type SecretMetadata = {
   createdAt: Date;
   updatedAt: Date;
   createdBy: string;
+  updatedBy?: string;
   version: number;
   tags?: Record<string, string>;
 };
@@ -37,3 +38,17 @@ export type SecretStore = {
 export type GetSecretResult =
   | { found: true; secret: Secret }
   | { found: false };
+
+/** Result type for bulk secret retrieval operations. */
+export type ListSecretsResult = {
+  secrets: Secret[];
+  total: number;
+};
+
+/** Options for filtering and paginating secret listings. */
+export type ListSecretsOptions = {
+  vaultId: string;
+  tags?: Record<string, string>;
+  limit?: number;
+  offset?: number;
+};
