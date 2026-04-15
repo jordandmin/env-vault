@@ -93,29 +93,38 @@ describe('listSecrets', () => {
     expect(list).toHaveLength(2);
     expect(list.map((s) => s.name).sort()).toEqual(['A', 'B']);
   });
+
+  it('returns an empty array when vault has no secrets', () => {
+    const store = createSecretStore();
+    expect(listSecrets(store, VAULT_ID)).toEqual([]);
+  });
 });
 
 describe('secretExists', () => {
   it('returns true when secret exists', () => {
     const store = createSecretStore();
-    setSecret(store, VAULT_ID, 'KEY', 'val', ACTOR);
-    expect(secretExists(store, VAULT_ID, 'KEY')).toBe(true);
+    setSecret(store, VAULT_ID, 'PRESENT', 'val', ACTOR);
+    expect(secretExists(store, VAULT_ID, 'PRESENT')).toBe(true);
   });
 
   it('returns false when secret does not exist', () => {
     const store = createSecretStore();
-    expect(secretExists(store, VAULT_ID, 'KEY')).toBe(false);
+    expect(secretExists(store, VAULT_ID, 'ABSENT')).toBe(false);
   });
 });
 
 describe('bulkSetSecrets', () => {
   it('sets multiple secrets at once', () => {
     const store = createSecretStore();
-    const results = bulkSetSecrets(store, VAULT_ID, [
-      { name: 'A', value: '1' },
-      { name: 'B', value: '2' },
-    ], ACTOR);
+    bulkSetSecrets(store, VAULT_ID, { FOO: 'foo', BAR: 'bar' }, ACTOR);
+    expect(getSecret(store, VAULT_ID, 'FOO')?.value).toBe('foo');
+    expect(getSecret(store, VAULT_ID, 'BAR')?.value).toBe('bar');
+  });
+
+  it('returns the list of set secrets', () => {
+    const store = createSecretStore();
+    const results = bulkSetSecrets(store, VAULT_ID, { X: '1', Y: '2' }, ACTOR);
     expect(results).toHaveLength(2);
-    expect(listSecrets(store, VAULT_ID)).toHaveLength(2);
+    expect(results.map((s) => s.name).sort()).toEqual(['X', 'Y']);
   });
 });
