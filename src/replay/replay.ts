@@ -93,3 +93,18 @@ export function cancelJob(store: ReplayStore, jobId: string): ReplayJob {
   job.completedAt = now();
   return job;
 }
+
+/**
+ * Returns a summary of all jobs for a vault grouped by status.
+ */
+export function getJobStats(
+  store: ReplayStore,
+  vaultId: string
+): Record<ReplayStatus, number> {
+  const jobs = listJobsForVault(store, vaultId);
+  const stats: Record<ReplayStatus, number> = { pending: 0, running: 0, completed: 0, failed: 0 };
+  for (const job of jobs) {
+    stats[job.status] += 1;
+  }
+  return stats;
+}
