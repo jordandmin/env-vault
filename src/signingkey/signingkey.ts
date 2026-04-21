@@ -1,4 +1,4 @@
-import { createHmac, randomBytes } from 'crypto';
+import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
 import {
   SigningKey,
   SigningKeyPolicy,
@@ -109,5 +109,9 @@ export function verifyPayload(
   const expected = createHmac(hashAlg, key.secret)
     .update(payload)
     .digest('hex');
-  return expected === signature;
+  // Use timing-safe comparison to prevent timing attacks
+  const expectedBuf = Buffer.from(expected, 'hex');
+  const actualBuf = Buffer.from(signature, 'hex');
+  if (expectedBuf.length !== actualBuf.length) return false;
+  return timingSafeEqual(expectedBuf, actualBuf);
 }
