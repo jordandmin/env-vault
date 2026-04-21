@@ -77,3 +77,20 @@ export function cacheStats<T>(cache: CacheStore<T>): { size: number; keys: strin
 export function makeCacheKey(...parts: string[]): string {
   return createHash("sha1").update(parts.join(":")).digest("hex");
 }
+
+/**
+ * Returns the remaining time-to-live in milliseconds for a cache entry.
+ * Returns `null` if the entry has no expiry, and `-1` if the key does not exist
+ * or has already expired (and will be purged as a side effect).
+ */
+export function cacheTtl<T>(cache: CacheStore<T>, key: string): number | null {
+  const entry = cache.store.get(key);
+  if (!entry) return -1;
+  if (entry.expiresAt === null) return null;
+  const remaining = entry.expiresAt - now();
+  if (remaining <= 0) {
+    cache.store.delete(key);
+    return -1;
+  }
+  return remaining;
+}
